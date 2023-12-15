@@ -22,6 +22,10 @@ from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Dense, Dropout
+from tensorflow.keras.models import Model
+from sklearn.metrics import classification_report
 import numpy as np
 import gc
 
@@ -188,35 +192,7 @@ class NaiveBayes:
         return prediction
 
 
-def evaluate(predictions, labels):
-    accuracy, mac_f1, mic_f1 = None, None, None
 
-    accuracy = accuracy_score(labels, predictions)
-
-    mac_f1 = f1_score(labels, predictions, average='macro')
-
-    mic_f1 = f1_score(labels, predictions, average='micro')
-
-    return accuracy, mac_f1, mic_f1
-    
-def bert_tokenizer_and_padding(X, tokenizer, max_seq_length):
-    X_encoded = tokenizer(X, max_seq_length=max_seq_length, truncation=True, padding='max_length', return_tensors='tf')
-    return X_encoded
-
-def build_model(bert_layer, num_classes):
-    input_word_ids = Input(shape=(max_seq_length,), dtype=tf.int32, name="input_word_ids")
-    inputs = [input_word_ids]
-    pooled_output, sequence_output = bert_layer(inputs)
-    output = Dense(num_classes, activation='softmax')(pooled_output)
-    model = Model(inputs=inputs, outputs=output)
-    return model
-
-def compile_model(model):
-    optimizer = Adam(learning_rate=2e-5)
-    loss = 'categorical_crossentropy'
-    metrics = ['accuracy']
-    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
-    return model
 
 import matplotlib.pyplot as plt
 
@@ -239,34 +215,52 @@ def plot_training_history(history):
     plt.ylabel('Loss')
     plt.show()
     
-def compute_class_weights(y):
-    class_weights = class_weight.compute_class_weight('balanced', np.unique(y), y)
-    class_weight_dict = dict(enumerate(class_weights))
-    return class_weight_dict
+def tokenize_tweet(text, tokenizer, max_length):
+    tokens = tokenizer.tokenize(text)[:max_length - 2]
+    return ["[CLS]"] + tokens + ["[SEP]"]
 
-def preprocess_for_bert(texts, max_length):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+def pad_tokens(tokens, max_length):
+    padding_length = max_length - len(tokens)
+    return tokens + [0] * padding_length, [1] * len(tokens) + [0] * padding_length
 
-    tokenized_texts = [tokenizer.encode(text, add_special_tokens=True, max_length=max_length, truncation=True) for text in texts]
-
-    padded_texts = np.array([text + [0] * (max_length - len(text)) for text in tokenized_texts])
-
-    attention_masks = np.where(padded_texts != 0, 1, 0)
-
-    segment_ids = np.zeros_like(padded_texts)
-
-    return padded_texts, attention_masks, segment_ids
+def generate_attention_masks(padded_tokens):
+    return [1 if token != 0 else 0 for token in padded_tokens]
 
 
-def fit_label_encoder(train_df):
+
+def get_early_stop(pat, delta)
+    return keras.callbacks.EarlyStopping(monitor = 'loss', patience = 5, mode = 'min', min_delta = 0.001, restore_best_weights = True)
+
+def create_neural_network(bert_component, sequence_length=128, num_classes=5):
+    input_ids = Input(shape=(sequence_length,), dtype=tf.int32, name="input_ids")
+    mask = Input(shape=(sequence_length,), dtype=tf.int32, name="mask")
+    segment_ids = Input(shape=(sequence_length,), dtype=tf.int32, name="segment_ids")
+
+    pooled_output, _ = bert_component([input_ids, mask, segment_ids])
+    pooled_flat = pooled_output[:, 0, :] 
+
+    layer_one = Dense(256, activation='relu')(pooled_flat)
+    layer_one_dropout = Dropout(0.5)(layer_one)
+    layer_two = Dense(128, activation='relu')(layer_one_dropout)
+    layer_two_dropout = Dropout(0.5)(layer_two)
+
+    final_output = Dense(num_classes, activation='softmax')(layer_two_dropout) 
+
+    neural_net = Model(inputs=[input_ids, mask, segment_ids], outputs=final_output)
+    neural_net.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    return neural_net
+
+def evaluate_network(neural_net, test_data, true_labels, label_encoder, data_frame):
+    predictions = neural_net.predict(test_data)
+    predicted_labels = [np.argmax(prediction) for prediction in predictions]
+    
+    decoded_predictions = label_encoder.inverse_transform(predicted_labels)
+    true_decoded_labels = data_frame['TargetColumn'].values
+
+    print(classification_report(true_decoded_labels, decoded_predictions, target_names=label_encoder.classes_))
+
+def get_encoded_label(df, y)
     le = LabelEncoder()
-    le.fit(train_df['Stance'])
-    return le
-
-
-def encode_labels(y, le):
-    y = le.transform(y)
-    return y
-
-def get_model(path):
-    return keras.models.load_model(path, custom_objects={'KerasLayer':hub.KerasLayer})
+    le.fit(df['Stance'])
+    return le.transform(y)
