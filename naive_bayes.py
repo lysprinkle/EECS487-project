@@ -226,12 +226,72 @@ def pad_tokens(tokens, max_length):
 def generate_attention_masks(padded_tokens):
     return [1 if token != 0 else 0 for token in padded_tokens]
 
+class ModelTrainingHandler:
+    
+    def __init__(self, tokenizer, bert_layer_url):
+        self.tokenizer = tokenizer
+        self.bert_layer_url = bert_layer_url
 
+    def _prepare_data(self, features):
+        tokenized_features = [self.tokenizer.encode(text, add_special_tokens=True) for text in features]
+        return tokenized_features
+
+    def _build_model(self):
+        bert_layer = tf.keras.layers.Lambda(lambda x: x, name="dummy_layer")
+        input_layer = Input(shape=(None,), dtype=tf.int32, name="input_layer")
+        output_layer = bert_layer(input_layer)
+        output = Dense(2, activation='softmax')(output_layer)
+        model = Model(inputs=input_layer, outputs=output)
+        return model
+
+    def train_model(self, features, labels, batch_size, learning_rate, num_epochs):
+        processed_features = self._prepare_data(features)
+        encoded_labels = to_categorical(labels, num_classes=2)
+
+        X_train, X_test, y_train, y_test = train_test_split(processed_features, encoded_labels, test_size=0.2, random_state=42)
+
+        model = self._build_model()
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate), loss='categorical_crossentropy', metrics=['accuracy'])
+        
+        lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=3)
+
+        model.fit(X_train, y_train, batch_size=batch_size, epochs=num_epochs, validation_data=(X_test, y_test), callbacks=[lr_scheduler])
+
+        y_pred = model.predict(X_test)
+        y_pred_classes = y_pred.argmax(axis=1)
+        y_test_classes = y_test.argmax(axis=1)
+        test_accuracy = accuracy_score(y_test_classes, y_pred_classes)
+
+        return model
+
+    class ModelTrainingFacade:
+
+    def __init__(self, tokenizer_module, bert_module):
+        self.text_tokenizer = tokenizer_module
+        self.bert_structure = bert_module
+
+
+    def single_run_training(self, features, labels, size_batch, rate_learning, epochs_num):
+        feature_train_prepped = self._prepare_text_data(features, self.text_tokenizer)
+        label_train_encoded = to_categorical(labels, dtype="uint8")
+
+        neural_model = self._construct_neural_network()
+
+        neural_model.compile(optimizer=keras.optimizers.Adam(learning_rate=rate_learning), loss='categorical_crossentropy', metrics=['accuracy'])
+
+        class_weighting = class_weight.compute_class_weight('balanced', np.unique(labels), labels)
+        dict_class_weights = dict(enumerate(class_weighting))
+
+        stop_early = EarlyStopping(monitor='val_loss', patience=5, mode='min', min_delta=0.001, restore_best_weights=True)
+
+        training_history = neural_model.fit(x=feature_train_prepped, y=label_train_encoded, batch_size=size_batch, class_weight=dict_class_weights, epochs=epochs_num, callbacks=[stop_early])
+
+        return neural_model
 
 def get_early_stop(pat, delta)
-    return keras.callbacks.EarlyStopping(monitor = 'loss', patience = 5, mode = 'min', min_delta = 0.001, restore_best_weights = True)
+    return keras.callbacks.EarlyStopping(monitor = 'loss', patience = 5, mode = 'min', min_delta = 0.01, restore_best_weights = True)
 
-def create_neural_network(bert_component, sequence_length=128, num_classes=5):
+def create_neural_network(bert_component, sequence_length=50, num_classes=5):
     input_ids = Input(shape=(sequence_length,), dtype=tf.int32, name="input_ids")
     mask = Input(shape=(sequence_length,), dtype=tf.int32, name="mask")
     segment_ids = Input(shape=(sequence_length,), dtype=tf.int32, name="segment_ids")
@@ -239,10 +299,10 @@ def create_neural_network(bert_component, sequence_length=128, num_classes=5):
     pooled_output, _ = bert_component([input_ids, mask, segment_ids])
     pooled_flat = pooled_output[:, 0, :] 
 
-    layer_one = Dense(256, activation='relu')(pooled_flat)
-    layer_one_dropout = Dropout(0.5)(layer_one)
+    layer_one = Dense(512, activation='relu')(pooled_flat)
+    layer_one_dropout = Dropout(0.8)(layer_one)
     layer_two = Dense(128, activation='relu')(layer_one_dropout)
-    layer_two_dropout = Dropout(0.5)(layer_two)
+    layer_two_dropout = Dropout(0.8)(layer_two)
 
     final_output = Dense(num_classes, activation='softmax')(layer_two_dropout) 
 
